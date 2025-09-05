@@ -21,7 +21,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "LCD_I2C.h"
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -31,7 +32,9 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+uint16_t readValue1, readValue2;
+char lcd_buffer1[20];
+char lcd_buffer2[20];
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -64,7 +67,20 @@ static void MX_TIM6_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
+void read_val1()
+{
+   HAL_ADC_Start(&hadc1);
+   HAL_ADC_PollForConversion(&hadc1,1000);
+   readValue1 = HAL_ADC_GetValue(&hadc1);
+   HAL_ADC_Stop(&hadc1);
+}
+void read_val2()
+{
+   HAL_ADC_Start(&hadc2);
+   HAL_ADC_PollForConversion(&hadc2,1000);
+   readValue2 = HAL_ADC_GetValue(&hadc2);
+   HAL_ADC_Stop(&hadc2);
+}
 /* USER CODE END 0 */
 
 /**
@@ -101,13 +117,26 @@ int main(void)
   MX_I2C2_Init();
   MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
-
+  LCD_INIT();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	read_val1();
+	read_val2();
+	// Display PA1 value on first row
+	LCD_SET_CURSOR(0, 0);
+	uint16_t percent1 = (readValue1 * 100) / 1023;
+	snprintf(lcd_buffer1, sizeof(lcd_buffer1), "PA1 : %3u%%", percent1);
+	LCD_SEND_STRING(lcd_buffer1);
+	// Display PA2 value on second row
+	LCD_SET_CURSOR(1, 0);
+	uint16_t percent2 = (readValue2 * 100) / 1023;
+	snprintf(lcd_buffer2, sizeof(lcd_buffer2), "PA2 : %3u%%", percent2);
+	LCD_SEND_STRING(lcd_buffer2);
+	HAL_Delay(500);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
