@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "cmsis_os.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -45,13 +46,46 @@ char lcd_buffer2[20];
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 ADC_HandleTypeDef hadc2;
-
 I2C_HandleTypeDef hi2c2;
-
 TIM_HandleTypeDef htim6;
-
+/* Definitions for defaultTask */
+osThreadId_t defaultTaskHandle;
+const osThreadAttr_t defaultTask_attributes = {
+  .name = "defaultTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+/* Definitions for ADC1Task */
+osThreadId_t ADC1TaskHandle;
+const osThreadAttr_t ADC1Task_attributes = {
+  .name = "ADC1Task",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityAboveNormal,
+};
+/* Definitions for ADC2Task */
+osThreadId_t ADC2TaskHandle;
+const osThreadAttr_t ADC2Task_attributes = {
+  .name = "ADC2Task",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityAboveNormal,
+};
+/* Definitions for DisplayTask */
+osThreadId_t DisplayTaskHandle;
+const osThreadAttr_t DisplayTask_attributes = {
+  .name = "DisplayTask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+/* Definitions for adcMutex */
+osMutexId_t adcMutexHandle;
+const osMutexAttr_t adcMutex_attributes = {
+  .name = "adcMutex"
+};
 /* USER CODE BEGIN PV */
-
+osThreadId_t adc1TaskHandle;
+osThreadId_t adc2TaskHandle;
+osThreadId_t displayTaskHandle;
+osMutexId_t adcMutexHandle;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -61,25 +95,81 @@ static void MX_ADC1_Init(void);
 static void MX_ADC2_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_TIM6_Init(void);
-/* USER CODE BEGIN PFP */
+void StartDefaultTask(void *argument);
+extern void ADC1_Task(void *argument);
+extern void ADC2_Task(void *argument);
+extern void Display_Task(void *argument);
 
+/* USER CODE BEGIN PFP */
+void read_val1(void);
+void read_val2(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void read_val1()
+void read_val1(void)
 {
+   osMutexAcquire(adcMutexHandle, osWaitForever);
    HAL_ADC_Start(&hadc1);
-   HAL_ADC_PollForConversion(&hadc1,1000);
+   HAL_ADC_PollForConversion(&hadc1, 1000);
    readValue1 = HAL_ADC_GetValue(&hadc1);
    HAL_ADC_Stop(&hadc1);
+   osMutexRelease(adcMutexHandle);
 }
-void read_val2()
+
+void read_val2(void)
 {
+   osMutexAcquire(adcMutexHandle, osWaitForever);
    HAL_ADC_Start(&hadc2);
-   HAL_ADC_PollForConversion(&hadc2,1000);
+   HAL_ADC_PollForConversion(&hadc2, 1000);
    readValue2 = HAL_ADC_GetValue(&hadc2);
    HAL_ADC_Stop(&hadc2);
+   osMutexRelease(adcMutexHandle);
+}
+
+/* ADC1 Task - reads every 100ms */
+void ADC1_Task(void *argument)
+{
+  const uint32_t delay_ms = 100;
+
+  for(;;)
+  {
+    read_val1();
+    osDelay(delay_ms);
+  }
+}
+
+/* ADC2 Task - reads every 500ms */
+void ADC2_Task(void *argument)
+{
+  const uint32_t delay_ms = 2000;
+
+  for(;;)
+  {
+    read_val2();
+    osDelay(delay_ms);
+  }
+}
+
+/* Display Task - updates LCD periodically */
+void Display_Task(void *argument)
+{
+  const uint32_t mydelay = 200;
+
+  for(;;)
+  {
+    // Display PA1 value on first row
+    LCD_SET_CURSOR(0, 0);
+    uint16_t percent1 = (readValue1 * 100) / 1023;
+    snprintf(lcd_buffer1, sizeof(lcd_buffer1), "PA1 : %3u%%", percent1);
+    LCD_SEND_STRING(lcd_buffer1);
+    // Display PA2 value on second row
+    LCD_SET_CURSOR(1, 0);
+    uint16_t percent2 = (readValue2 * 100) / 1023;
+    snprintf(lcd_buffer2, sizeof(lcd_buffer2), "PA2 : %3u%%", percent2);
+    LCD_SEND_STRING(lcd_buffer2);
+    osDelay(mydelay);
+  }
 }
 /* USER CODE END 0 */
 
@@ -120,23 +210,59 @@ int main(void)
   LCD_INIT();
   /* USER CODE END 2 */
 
+  /* Init scheduler */
+  osKernelInitialize();
+  /* Create the mutex(es) */
+  /* creation of adcMutex */
+  adcMutexHandle = osMutexNew(&adcMutex_attributes);
+
+  /* USER CODE BEGIN RTOS_MUTEX */
+  /* add mutexes, ... */
+  /* USER CODE END RTOS_MUTEX */
+
+  /* USER CODE BEGIN RTOS_SEMAPHORES */
+  /* add semaphores, ... */
+  /* USER CODE END RTOS_SEMAPHORES */
+
+  /* USER CODE BEGIN RTOS_TIMERS */
+  /* start timers, add new ones, ... */
+  /* USER CODE END RTOS_TIMERS */
+
+  /* USER CODE BEGIN RTOS_QUEUES */
+  /* add queues, ... */
+  /* USER CODE END RTOS_QUEUES */
+
+  /* Create the thread(s) */
+  /* creation of defaultTask */
+  defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
+
+  /* creation of ADC1Task */
+  ADC1TaskHandle = osThreadNew(ADC1_Task, NULL, &ADC1Task_attributes);
+
+  /* creation of ADC2Task */
+  ADC2TaskHandle = osThreadNew(ADC2_Task, NULL, &ADC2Task_attributes);
+
+  /* creation of DisplayTask */
+  DisplayTaskHandle = osThreadNew(Display_Task, NULL, &DisplayTask_attributes);
+
+  /* USER CODE BEGIN RTOS_THREADS */
+
+  /* USER CODE END RTOS_THREADS */
+
+  /* USER CODE BEGIN RTOS_EVENTS */
+  /* add events, ... */
+  /* USER CODE END RTOS_EVENTS */
+
+  /* Start scheduler */
+  osKernelStart();
+
+  /* We should never get here as control is now taken by the scheduler */
+
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	read_val1();
-	read_val2();
-	// Display PA1 value on first row
-	LCD_SET_CURSOR(0, 0);
-	uint16_t percent1 = (readValue1 * 100) / 1023;
-	snprintf(lcd_buffer1, sizeof(lcd_buffer1), "PA1 : %3u%%", percent1);
-	LCD_SEND_STRING(lcd_buffer1);
-	// Display PA2 value on second row
-	LCD_SET_CURSOR(1, 0);
-	uint16_t percent2 = (readValue2 * 100) / 1023;
-	snprintf(lcd_buffer2, sizeof(lcd_buffer2), "PA2 : %3u%%", percent2);
-	LCD_SEND_STRING(lcd_buffer2);
-	HAL_Delay(500);
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -387,6 +513,24 @@ static void MX_GPIO_Init(void)
 /* USER CODE BEGIN 4 */
 
 /* USER CODE END 4 */
+
+/* USER CODE BEGIN Header_StartDefaultTask */
+/**
+  * @brief  Function implementing the defaultTask thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_StartDefaultTask */
+void StartDefaultTask(void *argument)
+{
+  /* USER CODE BEGIN 5 */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END 5 */
+}
 
 /**
   * @brief  Period elapsed callback in non blocking mode
